@@ -68,3 +68,36 @@ type Invitation struct {
 type SignedShareList struct {
 	List map[string][]ShareEntry
 }
+
+// Directory 目录结构（B05 新增）
+// 借鉴学城权限继承模型：子文档默认继承父目录权限
+type Directory struct {
+	Owner         string
+	DirName       string
+	ParentDirID   *uuid.UUID // nil = 根目录
+	Children      []uuid.UUID // 子目录 + 子文件
+	Permissions   []Permission
+	InheritParent bool // 默认 true
+}
+
+// Permission 权限条目
+type Permission struct {
+	Subject     string // username / group_id / dept_path
+	SubjectType string // "user" / "group" / "dept"
+	PermLevel   int    // 1-5
+}
+
+// 5 级权限常量（借鉴学城）
+const (
+	PermBrowse        = 1 // 文档浏览
+	PermEdit          = 2 // 文档编辑
+	PermEditAdd       = 3 // 编辑 + 添加子文档
+	PermEditAddDelete = 4 // 编辑 + 添加 + 删除
+	PermManage        = 5 // 管理（设置权限、全部功能）
+)
+
+// SubjectIdentity 授权主体身份
+type SubjectIdentity struct {
+	Type    string // "user" / "group" / "dept"
+	Subject string // mis / group_id / dept_path
+}
