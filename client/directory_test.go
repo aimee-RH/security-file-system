@@ -1,17 +1,13 @@
 package client
 
-import (
-	"testing"
+// Directory 测试用例挂在 TestStepVersionSuite（stepversion_test.go）的 Ginkgo suite 下
+// Ginkgo 不支持多次 RunSpecs 调用，所有 Describe 块自动归到同一 suite
 
+import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
-
-func TestDirectorySuite(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Client Directory Tests")
-}
 
 var _ = Describe("Directory 权限继承", func() {
 	var dirID uuid.UUID

@@ -10,9 +10,10 @@ import (
 )
 
 // Ginkgo suite 入口（client_unittest.go 非 _test.go 后缀，go test 不识别）
+// 这是 client 包唯一的 Ginkgo suite 入口，所有 Describe 块自动归到这个 suite
 func TestStepVersionSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Client StepVersion Tests")
+	RunSpecs(t, "Client Tests") // 包括 stepVersion + Directory + 其他
 }
 
 func uuidFromHash(input []byte) (uuid.UUID, error) {

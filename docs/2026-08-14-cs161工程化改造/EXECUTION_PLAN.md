@@ -1,6 +1,6 @@
 # CS161 工程化改造 - 执行计划
 
-> 任务级状态：PLANNING
+> 任务级状态：COMPLETE
 > 创建日期：2026-08-14
 > 技术方案：/Users/gaoruihuan/docs/CS161工程化改造-技术方案-20260814.md
 > 项目根：/Users/gaoruihuan/security-file-system
@@ -40,10 +40,10 @@
 | B03 | CLI 命令包装 | P0 | DONE | 半天 | B02 |
 | B04 | REST API 服务 | P0 | DONE | 1 天 | B03 |
 | B05 | Directory + 权限继承 | P1 | DONE | 1-2 天 | B02 |
-| B06 | 鉴权层（用户+Agent 身份） | P1 | PENDING | 1 天 | B04 |
-| B07 | 审计日志 | P1 | PENDING | 半天 | B04 |
-| B08 | 频次限制 | P2 | PENDING | 半天 | B04 |
-| B09 | 通知服务 | P2 | PENDING | 半天 | B04 |
+| B06 | 鉴权层（用户+Agent 身份） | P1 | DONE | 1 天 | B04 |
+| B07 | 审计日志 | P1 | DONE | 半天 | B04 |
+| B08 | 频次限制 | P2 | DONE | 半天 | B04 |
+| B09 | 通知服务 | P2 | DONE | 半天 | B04 |
 
 **状态枚举**：PENDING / IN_PROGRESS / DONE / WAITING_CONFIRMATION / NOT_REQUIRED
 
