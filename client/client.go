@@ -342,6 +342,27 @@ func SaveFileMetadata(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte) 
 	return nil
 }
 
+// metadataWriteMu 保护 SaveFileMetadataWithVersion 的 Load+Check+Store 原子性
+// ponytail: CS161 限制不允许 import sync，单线程版本；多设备真并发冲突检测留到 B02 拆分后用 userlib 外层包同步
+// 当前实现：单线程下版本检测有效；多线程下 Load+Check+Store 不原子（已知限制）
+
+// ErrStepVersionConflict 客户端版本号与服务端不一致（文档被他人同时编辑）
+var ErrStepVersionConflict = errors.New("step version conflict: document modified by others")
+
+// SaveFileMetadataWithVersion 带乐观锁的保存：加载当前版本，
+// 与 expectedVersion 不匹配返回 ErrStepVersionConflict，匹配则保存新版本。
+// 借鉴学城 stepVersion 机制，解决多设备并发写入覆盖问题。
+func SaveFileMetadataWithVersion(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte, expectedVersion uint64) error {
+	// 加载当前 metadata
+	cur, err := LoadFileMetadata(id, encKey, hmacKey)
+	if err == nil && cur.Version != expectedVersion {
+		return ErrStepVersionConflict
+	}
+	// err != nil 表示 metadata 不存在（首次创建），允许保存
+
+	return SaveFileMetadata(id, meta, encKey, hmacKey)
+}
+
 func LoadFileMetadata(id uuid.UUID, encKey []byte, HMACKey []byte) (*FileMetadata, error) {
 	raw, ok := userlib.DatastoreGet(id)
 	if !ok {
@@ -784,8 +805,9 @@ func (userdata *User) AppendToFile(filename string, data []byte) error {
 	fileMetadata.NumberChunk++
 	fileMetadata.Version++
 
-	// 存储 fileMetadata
-	err = SaveFileMetadata(fileMetadataUUID, fileMetadata, metadataEncKey, metadataHMACKey)
+	// 存储 fileMetadata（带乐观锁）
+	// 借鉴学城 stepVersion：传入当前版本号，冲突时返回 ErrStepVersionConflict
+	err = SaveFileMetadataWithVersion(fileMetadataUUID, fileMetadata, metadataEncKey, metadataHMACKey, fileMetadata.Version-1)
 	if err != nil {
 		return err
 	}
@@ -794,6 +816,28 @@ func (userdata *User) AppendToFile(filename string, data []byte) error {
 	defer ZeroBytes(metadataHMACKey)
 	defer ZeroBytes(fileListEncKey)
 	defer ZeroBytes(fileListHMACKey)
+	return nil
+}
+
+// AppendWithRetry 带指数退避的重试封装
+// ponytail: CS161 不允许 import time，无退避；纯循环重试
+// 遇到 ErrStepVersionConflict 重新拉取并重试，其他错误直接返回
+func (userdata *User) AppendWithRetry(filename string, data []byte, maxRetry int) error {
+	if maxRetry < 0 {
+		maxRetry = 0
+	}
+	var lastErr error
+	for i := 0; i <= maxRetry; i++ {
+		lastErr = userdata.AppendToFile(filename, data)
+		if lastErr == nil {
+			return nil
+		}
+		if lastErr != ErrStepVersionConflict {
+			return lastErr
+		}
+		// conflict：下次循环会重新 LoadFileMetadata 拿最新版本
+	}
+	return errors.New("max retry exceeded")
 
 	return nil
 }
