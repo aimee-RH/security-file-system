@@ -37,7 +37,7 @@
 |---------|------|--------|------|-----------|---------|
 | B01 | stepVersion 乐观锁 | P0 | DONE | 半天 | 无 |
 | B02 | 业务域拆分 | P0 | DONE | 1 天 | B01 |
-| B03 | CLI 命令包装 | P0 | PENDING | 半天 | B02 |
+| B03 | CLI 命令包装 | P0 | DONE | 半天 | B02 |
 | B04 | REST API 服务 | P0 | PENDING | 1 天 | B03 |
 | B05 | Directory + 权限继承 | P1 | PENDING | 1-2 天 | B02 |
 | B06 | 鉴权层（用户+Agent 身份） | P1 | PENDING | 1 天 | B04 |
