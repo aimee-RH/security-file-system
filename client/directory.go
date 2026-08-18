@@ -25,13 +25,13 @@ func SaveDirectory(id uuid.UUID, dir *Directory, encKey, hmacKey []byte) error {
 	if err != nil {
 		return err
 	}
-	userlib.DatastoreSet(id, append(cipher, tag...))
+	DSSet(id, append(cipher, tag...))
 	return nil
 }
 
 // LoadDirectory 加载并解密目录
 func LoadDirectory(id uuid.UUID, encKey, hmacKey []byte) (*Directory, error) {
-	raw, ok := userlib.DatastoreGet(id)
+	raw, ok := DSGet(id)
 	if !ok {
 		return nil, errors.New("directory not found")
 	}

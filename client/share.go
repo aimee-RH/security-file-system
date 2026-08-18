@@ -79,7 +79,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	}
 	viewCopyEnc = append(viewCopyEnc, viewCopyHMAC...)
 	viewCopyAddr := uuid.New()
-	userlib.DatastoreSet(viewCopyAddr, viewCopyEnc)
+	DSSet(viewCopyAddr, viewCopyEnc)
 
 	// 5: Construct and sign invitation with hybrid encryption
 	viewBytes, err := json.Marshal(fvcopy)
@@ -120,7 +120,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	if err != nil {
 		return uuid.Nil, errors.New("CreateInvitation: Error marshaling invitation")
 	}
-	userlib.DatastoreSet(invID, invBytes)
+	DSSet(invID, invBytes)
 
 	defer ZeroBytes(fileListEncKey)
 	defer ZeroBytes(fileListHMACKey)
@@ -140,7 +140,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	}
 
 	// 2: Get and parse invitation
-	invByte, exist := userlib.DatastoreGet(invitationPtr)
+	invByte, exist := DSGet(invitationPtr)
 	if !exist || len(invByte) == 0 {
 		err := errors.New("AcceptInvitation: invitation missing or revoked")
 		fmt.Println("Created error:", err)
@@ -208,7 +208,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	curFileList[filename] = view
 
 	// 8: Delete invitation info
-	userlib.DatastoreDelete(invitationPtr)
+	DSDelete(invitationPtr)
 
 	// 9: Get Filemetadata and Verify FileMetadata integrity
 	var metadata *FileMetadata

@@ -23,7 +23,7 @@ func InitUser(username string, password string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := userlib.DatastoreGet(userUUID); ok {
+	if _, ok := DSGet(userUUID); ok {
 		return nil, errors.New("InitUser: user already exists")
 	}
 
@@ -66,7 +66,7 @@ func InitUser(username string, password string) (*User, error) {
 	// Store user data
 	finalBytes := append(salt, userByteEnc...)
 	finalBytes = append(finalBytes, userHmacTag...)
-	userlib.DatastoreSet(userUUID, finalBytes)
+	DSSet(userUUID, finalBytes)
 
 	return &userdata, nil
 }
@@ -77,7 +77,7 @@ func GetUser(username string, password string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored, ok := userlib.DatastoreGet(userUUID)
+	stored, ok := DSGet(userUUID)
 	if !ok {
 		return nil, errors.New("user not found")
 	}

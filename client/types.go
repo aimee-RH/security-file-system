@@ -101,3 +101,20 @@ type SubjectIdentity struct {
 	Type    string // "user" / "group" / "dept"
 	Subject string // mis / group_id / dept_path
 }
+
+// NotifyHook 通知回调，由接入层（cmd/cs161-server）注入
+// nil 时静默跳过（client 包不依赖具体通知实现，避免循环 import）
+// ponytail: 函数变量注入，避免引入 interface；升级路径=事件总线/MQ
+var NotifyHook func(recipient, event, payload string)
+
+// Notify 触发通知（如果 hook 已注入）
+func Notify(recipient, event, payload string) {
+	if NotifyHook != nil {
+		NotifyHook(recipient, event, payload)
+	}
+}
+
+// AppendRetryHook 并发 append 观测 hook，由测试/benchmark 注入
+// 每次 AppendWithRetry 结束调用，传入本次累计 retry 次数和最终是否冲突耗尽
+// ponytail: 函数变量注入，避免暴露内部状态；生产=nil，零开销
+var AppendRetryHook func(retryCount int, exhausted bool)

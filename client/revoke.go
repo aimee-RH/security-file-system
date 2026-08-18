@@ -93,7 +93,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 
 		invID, exists := invMap[recipientUsername]
 		if exists {
-			userlib.DatastoreDelete(invID)
+			DSDelete(invID)
 
 			delete(invMap, recipientUsername)
 			fileView.PendingInv = invMap
@@ -105,7 +105,9 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 				return errors.New("RevokeAccess: Failed to save file list after deleting pending invite")
 			}
 
-			_, ok := userlib.DatastoreGet(invID)
+			Notify(recipientUsername, "invitation_revoked", "file="+filename)
+
+			_, ok := DSGet(invID)
 			if ok {
 				userlib.DebugMsg("RevokeAccess Deletion failed: invitation still exists in Datastore!")
 			} else {
@@ -134,6 +136,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	// Step 7: BFS 遍历 ShareList，构造 revokeUsers 和 validUsers 列表
 	revokeUsers := make(map[string][]ShareEntry)
 	remainUsers := make(map[string][]ShareEntry)
+	revokedRecipients := make(map[string]bool) // 被撤销的用户名集合（通知用）
 
 	revokeUsers[userdata.Username] = []ShareEntry{originalShare}
 
@@ -141,11 +144,12 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
+		revokedRecipients[current] = true
 
 		for _, entry := range signedList.List[current] {
 			recipient := entry.Recipient
 
-			if _, alreadyRevoked := revokeUsers[recipient]; !alreadyRevoked {
+			if _, alreadyRevoked := revokedRecipients[recipient]; !alreadyRevoked {
 				revokeUsers[entry.Sender] = append(revokeUsers[entry.Sender], entry)
 				queue = append(queue, recipient)
 			}
@@ -174,7 +178,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	// 2. 删除所有被撤销用户的 FileView 条目
 	for user := range revokeUsers {
 		userFileListUUID, _ := uuid.FromBytes(userlib.Hash([]byte(user + "fileList"))[:16])
-		userFileListBytes, ok := userlib.DatastoreGet(userFileListUUID)
+		userFileListBytes, ok := DSGet(userFileListUUID)
 		if !ok {
 			return errors.New("RevokeAccess: UserFileList not exist")
 		}
@@ -348,7 +352,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	// 7. 删除旧 ShareList、Chunk 链、旧 Metadata
 	ptr := metadata.HeadPtr
 	for ptr != metadata.TailPtr {
-		chunkBytes, ok := userlib.DatastoreGet(ptr)
+		chunkBytes, ok := DSGet(ptr)
 		if !ok || len(chunkBytes) < 64 {
 			break
 		}
@@ -359,12 +363,25 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 			break
 		}
 		next := chunk.Next
-		userlib.DatastoreDelete(ptr)
+		DSDelete(ptr)
 		ptr = next
 	}
-	userlib.DatastoreDelete(metadata.TailPtr)
-	userlib.DatastoreDelete(metadata.ShareListAddr)
-	userlib.DatastoreDelete(fileView.MetadataUUID)
+	DSDelete(metadata.TailPtr)
+	DSDelete(metadata.ShareListAddr)
+	DSDelete(fileView.MetadataUUID)
+
+	// 通知所有被撤销用户
+	for user := range revokedRecipients {
+		Notify(user, "access_revoked", "file="+filename)
+	}
+	// 通知保留用户：文件已重加密，需重新加载
+	for _, entries := range remainUsers {
+		for _, e := range entries {
+			if e.Recipient != userdata.Username {
+				Notify(e.Recipient, "file_rekeyed", "file="+filename)
+			}
+		}
+	}
 
 	defer ZeroBytes(newEncKey)
 	defer ZeroBytes(newHMACKey)

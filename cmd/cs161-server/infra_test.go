@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cs161-staff/project2-starter-code/client"
 	"github.com/gin-gonic/gin"
+	userlib "github.com/cs161-staff/project2-userlib"
 )
 
 // B07 审计日志测试
@@ -218,5 +222,172 @@ func TestConcurrentLogAudit(t *testing.T) {
 	entries := GetAuditLog("")
 	if len(entries) != n {
 		t.Errorf("expected %d entries, got %d", n, len(entries))
+	}
+}
+
+// 接入层验收测试：生产路由 newAuthenticatedRouter 挂全部 middleware
+
+// 验收 1：无 token 访问受保护 endpoint 返回 401
+func TestAuthenticatedRouterRejectsNoToken(t *testing.T) {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/files/store", nil)
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 without token, got %d", w.Code)
+	}
+}
+
+// 验收 2：/api/auth/token 正确凭证换 token，错误凭证 401
+func TestIssueToken(t *testing.T) {
+	userlib.DatastoreClear()
+	userlib.KeystoreClear()
+	client.InitUser("alice", "pwd123")
+
+	body := `{"username":"alice","password":"pwd123"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/auth/token", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	// 错误密码 401
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/auth/token", strings.NewReader(`{"username":"alice","password":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for bad password, got %d", w.Code)
+	}
+}
+
+// 验收 3：持 token 访问受保护 endpoint 通过
+func TestAuthenticatedRouterAllowsWithToken(t *testing.T) {
+	userlib.DatastoreClear()
+	userlib.KeystoreClear()
+	TokenStore.Lock()
+	TokenStore.m = make(map[string]Identity)
+	TokenStore.Unlock()
+
+	client.InitUser("alice", "pwd123")
+
+	// 换 token
+	body := `{"username":"alice","password":"pwd123"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/auth/token", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	token, ok := resp["token"]
+	if !ok {
+		t.Fatalf("no token in response: %s", w.Body.String())
+	}
+
+	// 用 token 存文件
+	storeBody := `{"username":"alice","password":"pwd123","filename":"f.txt","data":"hi"}`
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/files/store", strings.NewReader(storeBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("expected 200 with token, got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// 验收 4：/api/audit 查询审计日志（需要 token）
+func TestAuditEndpoint(t *testing.T) {
+	ClearAuditLog()
+	TokenStore.Lock()
+	TokenStore.m = make(map[string]Identity)
+	TokenStore.Unlock()
+	token, _ := IssueToken(Identity{Type: "user", Subject: "alice"})
+
+	// 触发一次受保护请求产生审计日志
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/files/store", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	newAuthenticatedRouter().ServeHTTP(w, req)
+
+	// 查 audit
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/audit?subject=alice", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	newAuthenticatedRouter().ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "alice") {
+		t.Errorf("expected body to contain alice, got %s", w.Body.String())
+	}
+}
+
+// 验收 5：RevokeAccess 触发通知（client.NotifyHook 注入后）
+func TestRevokeTriggersNotify(t *testing.T) {
+	ClearNotifications()
+	prevHook := client.NotifyHook
+	client.NotifyHook = Notify
+	defer func() { client.NotifyHook = prevHook }()
+
+	userlib.DatastoreClear()
+	userlib.KeystoreClear()
+	client.InitUser("alice", "pwd123")
+	client.InitUser("bob", "pwd123")
+
+	u, _ := client.GetUser("alice", "pwd123")
+	u.StoreFile("secret.txt", []byte("content"))
+	invID, _ := u.CreateInvitation("secret.txt", "bob")
+
+	bob, _ := client.GetUser("bob", "pwd123")
+	bob.AcceptInvitation("alice", invID, "secret.txt")
+
+	if err := u.RevokeAccess("secret.txt", "bob"); err != nil {
+		t.Fatalf("revoke failed: %v", err)
+	}
+
+	notifs := GetNotifications("bob")
+	if len(notifs) == 0 {
+		t.Fatalf("expected bob to receive notification, got 0")
+	}
+	found := false
+	for _, n := range notifs {
+		if n.Event == "access_revoked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected access_revoked event, got %v", notifs)
+	}
+}
+
+// 验收 6：stepVersion 并发安全——多个 goroutine 同时 append 同一文件
+// 都应成功（不会覆盖），不会出现 chunk 丢失
+func TestStepVersionConcurrentAppend(t *testing.T) {
+	userlib.DatastoreClear()
+	userlib.KeystoreClear()
+	client.InitUser("alice", "pwd123")
+
+	u, _ := client.GetUser("alice", "pwd123")
+	u.StoreFile("concurrent.txt", []byte("init"))
+
+	var wg sync.WaitGroup
+	n := 10
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			u.AppendWithRetry("concurrent.txt", []byte("x"), 5)
+		}()
+	}
+	wg.Wait()
+
+	data, err := u.LoadFile("concurrent.txt")
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	if len(data) != 4+n {
+		t.Errorf("expected %d bytes, got %d (some appends lost)", 4+n, len(data))
 	}
 }

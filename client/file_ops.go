@@ -6,6 +6,7 @@ package client
 
 import (
 	"errors"
+	"time"
 
 	userlib "github.com/cs161-staff/project2-userlib"
 	"github.com/google/uuid"
@@ -113,7 +114,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			if err != nil {
 				return errors.New("StoreFile: fail to load old file chunk")
 			}
-			userlib.DatastoreDelete(curChunkUUID)
+			DSDelete(curChunkUUID)
 
 			if fileChunk.Next == fileMetadata.TailPtr {
 				break
@@ -159,7 +160,8 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 }
 
 // AppendToFile 追加数据到文件末尾
-// 内部使用 SaveFileMetadataWithVersion 实现乐观锁，冲突时返回 ErrStepVersionConflict
+// 用 per-metadataUUID 锁包住 LoadMeta+SaveChunk+SaveMeta 关键段，
+// 多 goroutine 串行 append 同一文件，避免 chunk 链表被覆盖
 func (userdata *User) AppendToFile(filename string, data []byte) error {
 	fileListEncKey, fileListHMACKey, err := DeriveKeys(userdata.FileKey, []byte("fileListEncKey"), []byte("fileListHMACKey"))
 	if err != nil {
@@ -183,6 +185,10 @@ func (userdata *User) AppendToFile(filename string, data []byte) error {
 	fileMetadataUUID := fileView.MetadataUUID
 	metadataEncKey := fileView.EncKey
 	metadataHMACKey := fileView.HMACKey
+
+	// 关键段：per-file 锁，保证 LoadMeta + SaveChunk + SaveMeta 原子
+	unlock := lockMetadata(fileMetadataUUID)
+	defer unlock()
 
 	fileMetadata, err := LoadFileMetadata(fileMetadataUUID, metadataEncKey, metadataHMACKey)
 	if err != nil || fileMetadata == nil {
@@ -209,8 +215,8 @@ func (userdata *User) AppendToFile(filename string, data []byte) error {
 	fileMetadata.NumberChunk++
 	fileMetadata.Version++
 
-	// 借鉴学城 stepVersion：传入当前版本号，冲突时返回 ErrStepVersionConflict
-	err = SaveFileMetadataWithVersion(fileMetadataUUID, fileMetadata, metadataEncKey, metadataHMACKey, fileMetadata.Version-1)
+	// 持锁状态调无锁版本（避免死锁）
+	err = saveFileMetadataWithVersionLocked(fileMetadataUUID, fileMetadata, metadataEncKey, metadataHMACKey, fileMetadata.Version-1)
 	if err != nil {
 		return err
 	}
@@ -223,22 +229,39 @@ func (userdata *User) AppendToFile(filename string, data []byte) error {
 }
 
 // AppendWithRetry 带重试的 append 封装
-// ponytail: CS161 不允许 import time，无指数退避；纯循环重试
-// 遇到 ErrStepVersionConflict 重新拉取并重试，其他错误直接返回
+// 遇到 ErrStepVersionConflict 重新拉取并重试，指数退避（每次失败 sleep 翻倍，上限 100ms）
+// AppendRetryHook 注入后上报 retry 次数和是否耗尽（测试/benchmark 用）
 func (userdata *User) AppendWithRetry(filename string, data []byte, maxRetry int) error {
 	if maxRetry < 0 {
 		maxRetry = 0
 	}
+	backoff := 5 * time.Millisecond
 	var lastErr error
+	retries := 0
 	for i := 0; i <= maxRetry; i++ {
 		lastErr = userdata.AppendToFile(filename, data)
 		if lastErr == nil {
+			if AppendRetryHook != nil {
+				AppendRetryHook(retries, false)
+			}
 			return nil
 		}
 		if lastErr != ErrStepVersionConflict {
+			if AppendRetryHook != nil {
+				AppendRetryHook(retries, false)
+			}
 			return lastErr
 		}
-		// conflict：下次循环会重新 LoadFileMetadata 拿最新版本
+		retries++
+		if i < maxRetry {
+			time.Sleep(backoff)
+			if backoff < 100*time.Millisecond {
+				backoff *= 2
+			}
+		}
+	}
+	if AppendRetryHook != nil {
+		AppendRetryHook(retries, true)
 	}
 	return errors.New("max retry exceeded")
 }

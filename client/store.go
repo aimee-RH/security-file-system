@@ -7,10 +7,42 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"sync"
 
 	userlib "github.com/cs161-staff/project2-userlib"
 	"github.com/google/uuid"
 )
+
+// metadataMu 保护 SaveFileMetadataWithVersion 的 Load+Check+Store 原子性
+// ponytail: per-UUID 锁，避免全局锁瓶颈；升级路径=分片锁或 CAS-based Datastore
+var metadataMu sync.Map // uuid.UUID → *sync.Mutex
+
+// datastoreMu 全局 datastore 访问锁
+// ponytail: userlib.DatastoreGet/Set/Delete 内部 map 操作非线程安全（见 userlib.go:135）
+// 多 goroutine 并发 append 时 LoadUserFileList 触发 fatal "concurrent map read and map write"
+// 全局锁是最低成本修复；升级路径=分片锁或换线程安全 datastore
+var datastoreMu sync.Mutex
+
+// DSGet 线程安全的 DatastoreGet 封装
+func DSGet(id uuid.UUID) ([]byte, bool) {
+	datastoreMu.Lock()
+	defer datastoreMu.Unlock()
+	return userlib.DatastoreGet(id)
+}
+
+// DSSet 线程安全的 DatastoreSet 封装
+func DSSet(id uuid.UUID, val []byte) {
+	datastoreMu.Lock()
+	defer datastoreMu.Unlock()
+	userlib.DatastoreSet(id, val)
+}
+
+// DSDelete 线程安全的 DatastoreDelete 封装
+func DSDelete(id uuid.UUID) {
+	datastoreMu.Lock()
+	defer datastoreMu.Unlock()
+	userlib.DatastoreDelete(id)
+}
 
 // ErrStepVersionConflict 客户端版本号与服务端不一致（文档被他人同时编辑）
 // 借鉴学城 stepVersion 机制
@@ -37,13 +69,13 @@ func SaveFileChunk(fileEncKey []byte, fileHMACKey []byte, id uuid.UUID, chunk *F
 	if err != nil {
 		return err
 	}
-	userlib.DatastoreSet(id, append(chunkEnc, chunkHMAC...))
+	DSSet(id, append(chunkEnc, chunkHMAC...))
 	return nil
 }
 
 // LoadFileChunk 验证 HMAC 并解密文件分块
 func LoadFileChunk(fileEncKey []byte, fileHMACKey []byte, id uuid.UUID) (*FileChunk, error) {
-	raw, ok := userlib.DatastoreGet(id)
+	raw, ok := DSGet(id)
 	if !ok {
 		return nil, errors.New("file Chunk not exist")
 	}
@@ -86,7 +118,7 @@ func SaveFileMetadata(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte) 
 	if err != nil {
 		return err
 	}
-	userlib.DatastoreSet(id, append(cipher, tag...))
+	DSSet(id, append(cipher, tag...))
 	return nil
 }
 
@@ -94,10 +126,19 @@ func SaveFileMetadata(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte) 
 // 与 expectedVersion 不匹配返回 ErrStepVersionConflict，匹配则保存新版本。
 // 借鉴学城 stepVersion 机制，解决多设备并发写入覆盖问题。
 //
-// ponytail: CS161 限制不允许 import sync，单线程版本；多设备真并发冲突检测留到 B02 拆分后用 userlib 外层包同步
-// 当前实现：单线程下版本检测有效；多线程下 Load+Check+Store 不原子（已知限制）
+// 用 per-UUID sync.Mutex 保护 Load+Check+Store 原子性，多 goroutine 真并发安全
 func SaveFileMetadataWithVersion(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte, expectedVersion uint64) error {
-	// 加载当前 metadata
+	mu, _ := metadataMu.LoadOrStore(id, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+
+	return saveFileMetadataWithVersionLocked(id, meta, encKey, hmacKey, expectedVersion)
+}
+
+// saveFileMetadataWithVersionLocked 无锁版本，调用方必须持有 metadataMu[id] 锁
+// ponytail: 拆出来给 AppendToFile 用——AppendToFile 把整个 LoadMeta+SaveChunk+SaveMeta 关键段放在同一把锁内，
+// 避免多 goroutine 读到相同 TailPtr 后互相覆盖 chunk 链表
+func saveFileMetadataWithVersionLocked(id uuid.UUID, meta *FileMetadata, encKey, hmacKey []byte, expectedVersion uint64) error {
 	cur, err := LoadFileMetadata(id, encKey, hmacKey)
 	if err == nil && cur.Version != expectedVersion {
 		return ErrStepVersionConflict
@@ -107,9 +148,16 @@ func SaveFileMetadataWithVersion(id uuid.UUID, meta *FileMetadata, encKey, hmacK
 	return SaveFileMetadata(id, meta, encKey, hmacKey)
 }
 
+// lockMetadata 获取 per-metadataUUID 锁（供 AppendToFile 关键段使用）
+func lockMetadata(id uuid.UUID) func() {
+	mu, _ := metadataMu.LoadOrStore(id, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return func() { mu.(*sync.Mutex).Unlock() }
+}
+
 // LoadFileMetadata 验证 HMAC 并解密文件元数据
 func LoadFileMetadata(id uuid.UUID, encKey []byte, HMACKey []byte) (*FileMetadata, error) {
-	raw, ok := userlib.DatastoreGet(id)
+	raw, ok := DSGet(id)
 	if !ok {
 		return nil, errors.New("metadata not found")
 	}
@@ -144,7 +192,7 @@ func LoadFileMetadata(id uuid.UUID, encKey []byte, HMACKey []byte) (*FileMetadat
 
 // LoadUserFileList 加载并验证用户文件列表
 func LoadUserFileList(id uuid.UUID, fileListEncKey []byte, fileListHMACKey []byte, isFirst bool) (fileList map[string]FileView, err error) {
-	userFileListStore, exist := userlib.DatastoreGet(id)
+	userFileListStore, exist := DSGet(id)
 	if !exist {
 		if !isFirst {
 			userlib.DebugMsg("user file list not found")
@@ -187,13 +235,13 @@ func SaveUserFileList(uuid uuid.UUID, encKey, macKey []byte, list map[string]Fil
 	if err != nil {
 		return err
 	}
-	userlib.DatastoreSet(uuid, append(cipher, tag...))
+	DSSet(uuid, append(cipher, tag...))
 	return nil
 }
 
 // LoadSignedShareList 加载共享列表
 func LoadSignedShareList(shareListAddr uuid.UUID) (*SignedShareList, error) {
-	shareListBytes, ok := userlib.DatastoreGet(shareListAddr)
+	shareListBytes, ok := DSGet(shareListAddr)
 	if !ok {
 		return nil, errors.New("RevokeAccess: ShareList not found")
 	}
@@ -211,7 +259,7 @@ func SaveSignedShareList(shareListAddr uuid.UUID, signedList *SignedShareList) e
 	if err != nil {
 		return errors.New("error decode ShareList")
 	}
-	userlib.DatastoreSet(shareListAddr, updatedSignedList)
+	DSSet(shareListAddr, updatedSignedList)
 	return nil
 }
 

@@ -77,8 +77,9 @@ func (r *RateLimiter) Allow(key string) bool {
 	return true
 }
 
-// DefaultRateLimiter 默认限流器：每用户每秒 10 个请求
-var DefaultRateLimiter = NewRateLimiter(10, time.Second, 10)
+// DefaultRateLimiter 默认限流器：每用户每秒 100 个请求
+// ponytail: demo/单机场景；生产应换 Redis 分布式限流 + 更低阈值
+var DefaultRateLimiter = NewRateLimiter(100, time.Second, 100)
 
 // RateLimitMiddleware 限流中间件
 // 按 identity.Subject 限流

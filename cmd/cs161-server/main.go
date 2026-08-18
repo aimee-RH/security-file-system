@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/cs161-staff/project2-starter-code/client"
@@ -26,8 +27,8 @@ type APIRequest struct {
 	InvitationID string `json:"invitation_id"`
 }
 
-// newRouter 构造 gin router，挂载所有 API endpoint
-// 抽成函数方便测试用 httptest 调用
+// newRouter 构造 gin router，挂载所有 API endpoint（无 middleware，老测试用）
+// 生产请用 newAuthenticatedRouter()
 func newRouter() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -45,6 +46,57 @@ func newRouter() *gin.Engine {
 	}
 
 	return r
+}
+
+// newAuthenticatedRouter 生产路由：挂 Auth + Audit + RateLimit middleware
+// - /api/users/init 和 /api/auth/token 豁免 AuthMiddleware（创建用户/换取 token 时无 token）
+// - 其他 endpoint 都要求 Bearer token
+// - /api/audit 和 /api/notifications 暴露审计和通知查询
+func newAuthenticatedRouter() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(AuditMiddleware())
+
+	// 豁免 AuthMiddleware 的 endpoint（按 IP 限流）
+	r.POST("/api/users/init", RateLimitMiddleware(DefaultRateLimiter), handleUserInit)
+	r.POST("/api/auth/token", RateLimitMiddleware(DefaultRateLimiter), handleIssueToken)
+
+	// 需要鉴权的 endpoint：AuthMiddleware 之后再 RateLimit，按 identity.Subject 限流
+	auth := r.Group("", AuthMiddleware(), RateLimitMiddleware(DefaultRateLimiter))
+	{
+		auth.POST("/api/files/store", handleFileStore)
+		auth.GET("/api/files/load", handleFileLoad)
+		auth.POST("/api/files/append", handleFileAppend)
+		auth.POST("/api/share/invite", handleShareInvite)
+		auth.POST("/api/share/accept", handleShareAccept)
+		auth.POST("/api/share/revoke", handleShareRevoke)
+		auth.GET("/api/audit", AuditQueryHandler)
+		auth.GET("/api/notifications", NotifyHandler)
+	}
+
+	return r
+}
+
+// handleIssueToken POST /api/auth/token
+// 用 username/password 换取 Bearer token（CS161 原生鉴权 + Agent 身份 token 二层封装）
+func handleIssueToken(c *gin.Context) {
+	var req APIRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// 用 GetUser 验证 username/password
+	if _, err := client.GetUser(req.Username, req.Password); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+	token, err := IssueToken(Identity{Type: "user", Subject: req.Username})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token, "subject": req.Username})
 }
 
 // handleUserInit POST /api/users/init
@@ -192,9 +244,16 @@ func handleShareRevoke(c *gin.Context) {
 }
 
 func main() {
-	r := newRouter()
-	fmt.Println("CS161 server listening on :8080")
-	if err := r.Run(":8080"); err != nil {
+	// 注入通知回调：撤销/重加密时通过 NotifyStore 推送通知
+	client.NotifyHook = Notify
+
+	r := newAuthenticatedRouter()
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	fmt.Printf("CS161 server listening on :%s\n", port)
+	if err := r.Run(":" + port); err != nil {
 		panic(err)
 	}
 }
