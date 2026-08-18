@@ -96,7 +96,8 @@ go test ./client_test/
 - [并发基准](docs/benchmark.md) — 吞吐/冲突率/活性数据
 - [威胁模型](docs/threat-model.md) — 6 类攻击防御 + vs Dropbox/学城对比
 - [架构对比](docs/architecture-comparison.md) — vs 学城 12.3/12.4 深度对比，模型层权衡
-- [面试 QA 准备](docs/interview-qa.md) — 15 个问答 + 反问环节 + 准备优先级
+- [面试 QA 准备](docs/interview-qa.md) — 16 个问答 + 反问环节 + 准备优先级
+- [long-task-spec-to-pr 复盘](docs/2026-08-18-long-task-retrospective.md) — AI 协作流程复盘 + 4 个面试故事
 - [工程化改造报告](docs/2026-08-14-cs161工程化改造/FINAL_REPORT.md) — 9 批次交付记录
 - [执行计划](docs/2026-08-14-cs161工程化改造/EXECUTION_PLAN.md) — TDD 接缝设计
 

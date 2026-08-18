@@ -330,6 +330,277 @@ OAEP 引入随机 padding + 哈希校验，解密失败时无法区分"padding �
 
 ---
 
+### Q16：你怎么用 AI 协作开发？
+
+**为什么问**：2026 秋招后端岗普遍期待 AI 协作能力。考察是否真有方法论，不是工具堆砌。
+
+**参考答案（30 秒口述版）**：
+
+> 我用 Claude Code 协作，核心是长任务 spec + TDD 工作流。把"打磨简历项目"拆成 SPEC 文档，每个故事先写失败测试（红），再最小实现通过（绿），最后写文档（重构）。这次简历打磨用了 `/long-task-spec-to-pr` skill——它强制我在动手前读完文档、扫完代码、列出测试接缝、生成执行计划，用户确认后才进实现阶段。
+
+**展开版（被追问时讲）**：
+
+长任务 spec 是一个三件套：EXECUTION_PLAN + QUESTIONS + FINAL_REPORT。
+
+**为什么这么做**：AI 协作最大的坑不是代码错，是**上下文丢失**。一个长任务跨多轮对话，AI 容易忘之前讨论过什么、决策了什么。三件套就是把"决策"和"未决项"落文件，跨轮恢复时不丢。
+
+- **EXECUTION_PLAN** 记录批次拆分 + 接缝清单 + 进度追踪表。这次简历打磨拆了 3 个故事、9 个 task，每个 task 有 PENDING/DONE/WAITING_CONFIRMATION 状态
+- **QUESTIONS** 记录所有不明确点，用稳定 ID（Q-001、Q-002）+ 状态机（OPEN/ACTION_PENDING/RESOLVED/DEFERRED）。比如这次有 Q-001 仓库改造策略、Q-002 批次粒度等，全部 RESOLVED
+- **FINAL_REPORT** 是交付报告，含功能清单、测试覆盖、review 修复记录、上线 checklist
+
+核心原则：**不靠脑子记，必须落文件**。
+
+**追问"接缝先行"时**：
+
+接缝是"在哪些公共边界测"。比如这次并发基准故事，我列出 9 个测试接缝：`TestConcurrentAppend_N` 验证 N 并发不丢 chunk、`TestConcurrentAppend_NoDeadlock` 验证无死锁、`TestConflictRateCurve` 验证冲突率曲线等。
+
+为什么先列接缝：TDD 容易写成"测代码内部实现"，但好的测试应该测**公共边界行为**。先把接缝列出来，AI 写测试时不会去 mock 内部协作者或测私有方法——这是 TDD 反模式。
+
+**追问"发现 bug 后怎么处理"时**（最强故事）：
+
+这是 AI 协作最大的价值——**让测试驱动 bug 发现**。
+
+发现 fatal 后，按长任务 spec 的流程：
+1. 看堆栈定位到 `userlib.go:135`
+2. 看 userlib 源码：`datastore` 用 `sync.Map` 但 `getDatastoreShard` 返回普通 map，非线程安全
+3. userlib 是课程框架不可改，只能在 client 层加锁
+4. 第一版加全局 `sync.Mutex`——测试通过，但发现 append 仍丢 chunk
+5. 反思：全局锁只保护单次 Datastore 调用，append 关键段三步（LoadMeta + SaveChunk + SaveMeta）之间仍能被插入
+6. 第二版加 per-UUID mutex 包住整个关键段，跑通
+
+这个过程体现的是**单步原子 ≠ 关键段原子**——锁的粒度要匹配关键段，不是单个操作。AI 协作帮我快速试错，每次失败都有具体堆栈可定位。
+
+**追问"和传统开发区别"时**：
+
+三个本质区别：
+
+1. **测试驱动 vs 代码驱动**：传统开发先写代码再补测试，测试经常漏关键路径。AI 协作是 spec → 接缝 → 测试 → 实现，测试先于代码存在，覆盖度更可控
+2. **文档驱动 vs 脑子记**：传统开发决策散落在聊天记录/脑子里，跨天就忘。三件套强制落文件，跨轮恢复时不丢
+3. **对抗性测试敢于写**：传统开发怕测试难写就跳过。AI 协作让 AI 先写测试框架，我填充关键断言——6 类攻击测试这种对抗性测试，以前根本不会写，现在每个安全声明都有契约
+
+关键体感：AI 协作最大价值不是写代码快，是**让我敢于写对抗性测试**。这次发现 userlib fatal 就是测试驱动的——如果先写代码再补测试，这个 bug 永远不会暴露。
+
+**支撑材料**：
+- `docs/2026-08-17-resume-polish/SPEC.md` — TDD spec
+- `docs/2026-08-14-cs161工程化改造/EXECUTION_PLAN.md` + `QUESTIONS.md` + `FINAL_REPORT.md` — 三件套
+- `client/store.go:20-24` — ponytail 注释记录 userlib fatal 修复
+- `client/threat_model_test.go` — 6 类对抗性测试
+
+**注意事项**：
+- 不要硬背术语——"长任务 spec"、"三件套"、"接缝先行"是真实用的，自然讲
+- 用具体例子——userlib fatal 故事是最强素材，有完整调试链
+- 体现反思——"单步原子 ≠ 关键段原子"是 AI 协作中真学到的，不是抄来的
+- 避免浮夸——不说"AI 让我 10x 效率"，说"让我敢于写对抗性测试"
+
+---
+
+### Q17：你说"项目级 CLAUDE.md 沉淀路径白名单与编码规范"，具体怎么做的？和直接写 prompt 有什么区别？
+
+**为什么问**：验证你是否真懂 AI 编码规范工程化，还是抄概念。
+
+**参考答案**：
+
+CLAUDE.md 是项目级 AI 行为规则入口，跟直接写 prompt 的区别在 3 个维度：
+
+**1. 加载机制**：CLAUDE.md 在 Claude Code 启动时自动加载到上下文，不用每次 prompt 重复写。生产项目（如 insurance_mall）进一步用 `.agent-harness/rules/` 配 paths frontmatter 按文件类型触发——处理 `.java` 自动加载 java-coding-standards，处理 `src/test/` 自动加载 testing-standards，避免一次性塞满上下文。
+
+我的项目简化版：CLAUDE.md 里定义了 issue tracker 路径约定、triage labels、domain docs 布局。AI 协作时不需要我每次说"放在 .scratch/<feature>/ 下"——规则在 CLAUDE.md 里，AI 自动遵守。
+
+**2. 规则可执行性**：CLAUDE.md 是文档级约束，靠 AI 自觉。生产项目用 ArchUnit 把规则变成 CI 护栏——违反就构建失败，不靠 AI 自觉。
+
+我的项目没 ArchUnit，但有替代机制——TDD 测试本身就是护栏。比如"per-UUID 锁串行化 append"这个规则，靠 `TestConcurrentAppend_100` 强制校验，违反就测试失败。
+
+**3. 路径白名单保护存量代码**：insurance_mall 的 §0 规则最巧妙——AI 改存量代码时保持现有风格，新建代码才按新规范。这避免 AI 把历史代码"顺手重构"污染风格。
+
+我的项目对齐：CLAUDE.md 里写"prefer editing existing files to creating new ones"，AI 协作时确实遵守——比如加 NotifyHook 时改 types.go 而不是新建 notify.go。
+
+**追问"和直接写 prompt 区别"**：prompt 是临时指令，CLAUDE.md 是持久契约。临时指令容易忘，持久契约会自动加载。生产项目进一步用 paths 机制让规则按需触发——这是 insurance_mall 的核心创新，避免 CLAUDE.md 膨胀到上下文爆炸。
+
+---
+
+### Q18：你的 AI 协作流程和生产项目（如 insurance_mall）的 DDD harness 有什么差距？
+
+**为什么问**：验证你是否对齐过生产级 AI 编码规范，能否讲出真实差距。
+
+**参考答案**（坦诚承认 gap）：
+
+我的项目对齐了**哲学层**，但没对齐**工程化护栏层**。
+
+**对齐的部分**（哲学层）：
+
+1. Karpathy 4 准则——简洁优先 / 精准修改 / 目标驱动 / 编码前思考。我的 ponytail skill 完全对齐
+2. 长任务三件套——EXECUTION_PLAN + QUESTIONS + FINAL_REPORT，对齐 insurance_mall 的 docs/YYYY-MM-DD-需求中文名/ 工作区
+3. TDD 红→绿→重构——把"添加验证"转化为"为无效输入写测试"，对齐 Karpathy 目标驱动执行
+
+**未对齐的部分**（工程化护栏层）：
+
+1. **ArchUnit 可执行护栏**：insurance_mall 有 10 条 ArchUnit 规则 CI 自动校验（outapi 单方法 / UseCase 不互调 / domain 不依赖 Spring 等）。我的项目没有 CI 强制校验架构约束——靠 TDD 测试做替代，但不如 ArchUnit 严格
+2. **paths frontmatter 按需加载**：insurance_mall 用 `.agent-harness/rules/*.md` 配 paths 触发，处理 `.java` 自动加载 java-coding-standards。我的项目 CLAUDE.md 是静态规则，没有按文件类型触发
+3. **窄端口/适配器分离**：insurance_mall 有 OutApi 接口（每接口一方法）+ OutAdaptor 实现的 DDD 分层。我的项目是 client 包内文件级拆分，没有端口/适配器分离
+4. **新旧规范过渡判断**：insurance_mall §0 规则——改存量保持现有风格，新建按新规范。我的项目没显式规则，但实际遵循了"prefer editing existing files"
+
+**为什么没对齐**：项目定位不同。insurance_mall 是生产 DDD 项目，需要工程化护栏防止 AI 污染架构。我的项目是课程作业+工程化改造，scope 不需要 ArchUnit。但哲学对齐已经足够讲故事——面试官追问时能讲清"对齐了什么、没对齐什么、为什么"，比硬撑"全对齐"可信。
+
+---
+
+### Q19：insurance_mall 的 §0 新旧规范过渡判断为什么重要？AI 协作时怎么避免污染存量代码？
+
+**为什么问**：考察对生产级 AI 编码规范的理解深度——这是 insurance_mall 的核心创新之一。
+
+**参考答案**：
+
+§0 规则解决的是**AI 协作最大的隐患**：AI 倾向于"顺手重构"——改一个方法时把周边代码也"优化"成新风格，导致存量代码风格污染。
+
+insurance_mall 的 3 条判断规则：
+- ① 创建新文件 → 严格遵循新规范
+- ② 重构现有文件结构 → 向新规范靠拢，但不改业务逻辑
+- ③ 修改存量业务逻辑 → 保持现有风格，最小化修改
+
+**为什么重要**：生产项目代码库大，新旧规范过渡期长。如果 AI 每次改存量代码都"顺手重构"，会导致：
+1. PR diff 膨胀——review 困难
+2. 风格不一致——同一文件新旧风格混用
+3. 回归风险——重构可能引入 bug
+
+**AI 协作时怎么避免**：
+1. CLAUDE.md / AGENTS.md 显式写规则——"只修改任务要求的部分，不重构周边无关代码"
+2. paths 白名单——限定 AI 可改的路径
+3. PR review 检查 diff 范围——每行修改都能追溯到用户请求
+
+**我的项目对齐情况**：
+- CLAUDE.md 写了"prefer editing existing files to creating new ones"
+- 实际协作时确实遵守——比如加 NotifyHook 时改 types.go 而不是新建 notify.go
+- 但没显式 §0 规则，靠 AI 自觉 + 我 review
+
+**生产级改进**：如果要做生产级 harness，会把 §0 规则写进 CLAUDE.md，配 paths 白名单（限定可改路径），再加 ArchUnit 校验风格一致性。
+
+---
+
+### Q20：你提到 ponytail 简洁优先原则，和 Karpathy 的准则什么关系？具体怎么落地？
+
+**为什么问**：验证你是否真理解简洁优先的工程含义，而不是口号。
+
+**参考答案**：
+
+ponytail 是我项目用的 skill，完全对齐 Karpathy 4 准则中的"简洁优先"。核心思想：**用最少代码解决问题，不为一次性代码创建抽象**。
+
+**7 级 ladder**（ponytail 的具体落地）：
+1. 这个功能需要存在吗？（YAGNI）
+2. 已在代码库里有 helper 吗？（reuse）
+3. stdlib 能做吗？
+4. 原生平台特性覆盖吗？
+5. 已安装依赖能解决吗？
+6. 能写成一行吗？
+7. 才写最小代码
+
+**具体例子**（本次简历打磨中的落地）：
+
+加 NotifyHook 时，第一反应是建 notify.go 新文件 + Notify struct + Notify interface。但按 ponytail ladder：
+- 第 1 级：需要 Notify struct 吗？不需要——只是函数变量
+- 第 2 级：stdlib 有吗？没有，但 Go 函数变量本身就够了
+- 第 6 级：能一行吗？能——`var NotifyHook func(recipient, event, payload string)`
+
+最终实现就 1 行变量 + 1 个 Notify 包装函数。没建 interface，没建 struct，没建 notify.go 新文件——改 types.go 加 10 行代码搞定。
+
+**对比"不用 ponytail"的版本**：
+- 建 `NotifyService` interface
+- 建 `InMemoryNotifyService` 实现
+- 建 `notify.go` 文件
+- 加 `NotifyServiceFactory`
+- ~80 行代码
+
+**学到的**：AI 协作最大的诱惑是"过度抽象"——AI 倾向于建 interface/factory/config，因为训练数据里这些模式常见。ponytail 强制走 ladder，每级问"真的需要吗"，把抽象压到最低。
+
+**和 Karpathy 准则的对应**：
+- "用最少代码解决" → ladder 第 7 级
+- "不为一次性代码创建抽象" → ladder 第 1-2 级
+- "资深工程师会觉得过于复杂吗" → ladder 每级的检验标准
+
+---
+
+### Q21：长任务三件套（EXECUTION_PLAN + QUESTIONS + FINAL_REPORT）为什么必要？AI 协作没有这套流程会怎样？
+
+**为什么问**：验证你是否真懂三件套的价值，还是形式主义。
+
+**参考答案**：
+
+三件套解决的是**AI 协作最大的坑：上下文丢失**。
+
+AI 协作跨多轮对话，每轮上下文窗口有限。没有三件套时：
+- 第 1 轮决策"用 per-UUID 锁"
+- 第 5 轮 AI 忘了，又提出"用全局锁"
+- 第 10 轮 AI 又忘了，提出"用 channel 同步"
+- 反复返工，效率低
+
+有三件套时：
+- EXECUTION_PLAN 记录 9 个 task 状态（PENDING/DONE/WAITING_CONFIRMATION）
+- QUESTIONS 记录 5 个决策问题（Q-001 到 Q-005）+ 状态机（OPEN/RESOLVED）
+- 每轮 AI 从文件读状态，不靠聊天上下文恢复
+
+**具体例子**（本次简历打磨）：
+
+Q-004 我问用户"Directory 权限继承是否必要"，用户决定"必做"。这个决策记在 QUESTIONS.md 里，跨多轮对话后 AI 仍然知道"B05 必须做"——不会忘。
+
+如果不落文件，第 5 轮 AI 可能会说"Directory 权限继承看起来过度设计，建议跳过"——忘了几轮前的决策。
+
+**三件套 vs GitHub Issue**：
+- Issue 适合多任务跟踪（每个 issue 独立）
+- 三件套是**单任务的三视角**：计划（EXECUTION_PLAN）+ 决策（QUESTIONS）+ 报告（FINAL_REPORT）
+- 三件套在同一目录，互相引用，形成完整任务档案
+
+**生产项目对齐**：insurance_mall 的 CLAUDE.md 明确要求"每个需求在仓库根目录 `docs/YYYY-MM-DD-需求中文名/` 唯一工作区"——和我用的 `docs/2026-08-17-resume-polish/` 完全同款设计。这不是巧合，是 AI 编码规范工程化的通用模式。
+
+---
+
+### Q22：如果让你给团队设计 AI 编码规范 harness，你会怎么做？
+
+**为什么问**：考察从消费者到设计者的跃迁——能否把学到的设计思想应用到新场景。
+
+**参考答案**（分层设计）：
+
+我会分 4 层设计，对应 insurance_mall 的层次：
+
+**第 1 层：哲学层（CLAUDE.md / AGENTS.md）**
+
+写 Karpathy 4 准则 + 项目特定的 AI 行为约束。这层是文档级，靠 AI 自觉。
+- 编码前思考 / 简洁优先 / 精准修改 / 目标驱动
+- 业务线识别规则（如 insurance_mall 的药划算/C端/B端识别）
+- 路径白名单（哪些路径可改，哪些不能动）
+
+**第 2 层：规则层（.agent-harness/rules/）**
+
+按 paths frontmatter 按需加载。这层是上下文级，处理特定文件类型时触发。
+- `java-coding-standards.md` paths: `**/src/main/**/*.java`
+- `testing-standards.md` paths: `**/src/test/**`
+- `logging-standards.md` paths: `**/src/main/**/*.java`
+
+**关键设计**：paths 触发避免上下文膨胀——处理 Java 文件时不加载测试规范，反之亦然。
+
+**第 3 层：护栏层（ArchUnit / CI）**
+
+可执行规则，CI 强制校验。这层是硬约束，不靠 AI 自觉。
+- outapi 单方法
+- UseCase 不互调
+- domain 不依赖 Spring
+- entity 禁 public setter
+
+**关键设计**：护栏层让规则从"应该做"变成"必须做"。AI 违反规则时 CI 失败，不是等 review 发现。
+
+**第 4 层（可选）：过程层（docs/YYYY-MM-DD-需求中文名/）**
+
+长任务三件套工作区。这层是任务级，跨轮恢复上下文。
+- EXECUTION_PLAN + QUESTIONS + FINAL_REPORT
+- 跨天续做不改名
+
+**给团队推广时的关键点**：
+1. 不要一次性铺所有层——先哲学层 + 过程层，跑顺后再加规则层和护栏层
+2. 护栏层必须 CI 强制——文档级规则容易被 AI 忽略
+3. paths 机制是核心创新——避免上下文膨胀，比"把所有规则塞 CLAUDE.md"高效
+4. 新旧规范过渡判断（§0）必须显式写——避免 AI 顺手重构污染存量代码
+
+**我的项目对齐情况**：哲学层 ✅ + 过程层 ✅ + 规则层 ❌（没 paths 机制）+ 护栏层 ❌（没 ArchUnit）。如果做生产级 harness，会补规则层和护栏层。
+
+---
+
 ## 五、反问环节（你问面试官）
 
 建议准备 2-3 个问题，体现深度：
@@ -346,9 +617,10 @@ OAEP 引入随机 padding + 哈希校验，解密失败时无法区分"padding �
 |--------|---------|
 | P0 | Q1-Q6 项目追问（核心） |
 | P0 | Q13 行为面（userlib fatal 故事） |
+| P0 | Q17-Q22 AI 协作工程化（深度对齐 insurance_mall 设计） |
 | P1 | Q9-Q12 八股（密码学基础） |
 | P1 | Q7-Q8 系统设计扩展 |
-| P2 | Q14-Q15 行为面（反思类） |
+| P2 | Q14-Q16 行为面（反思类 + AI 协作流程） |
 
 ## 答题节奏建议
 
