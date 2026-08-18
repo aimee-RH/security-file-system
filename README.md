@@ -98,6 +98,7 @@ go test ./client_test/
 - [架构对比](docs/architecture-comparison.md) — vs 学城 12.3/12.4 深度对比，模型层权衡
 - [面试 QA 准备](docs/interview-qa.md) — 16 个问答 + 反问环节 + 准备优先级
 - [long-task-spec-to-pr 复盘](docs/2026-08-18-long-task-retrospective.md) — AI 协作流程复盘 + 4 个面试故事
+- [insurance_mall submitOrder 面试 QA](docs/2026-08-18-insurance-mall-submitorder-interview-qa.md) — 10 个金融场景提单链路深度 QA
 - [工程化改造报告](docs/2026-08-14-cs161工程化改造/FINAL_REPORT.md) — 9 批次交付记录
 - [执行计划](docs/2026-08-14-cs161工程化改造/EXECUTION_PLAN.md) — TDD 接缝设计
 
