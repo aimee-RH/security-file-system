@@ -315,6 +315,7 @@ $$('[data-scroll-demo]').forEach((button) => button.addEventListener("click", ()
 if (IS_STATIC_DEMO) {
   $("#backend-mode-label").textContent = "PORTFOLIO DEMO";
   $("#backend-mode-copy").textContent = "GitHub Pages runs this walkthrough in-browser. Clone the repository to exercise the real Gin API and cryptographic core.";
+  $("#demo-intro-copy").textContent = "This interactive portfolio simulation creates three users, encrypts a file, builds a downstream sharing chain, then demonstrates recursive revocation.";
   $(".system-status").innerHTML = "<i></i> Demo ready";
 }
 renderStep();
