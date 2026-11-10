@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="An interactive demo of encrypted file sharing, recursive revocation, and auditable access control."
+    />
+    <title>VaultShare — Secure file sharing demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="VaultShare home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="img">
+            <path d="M16 2.75 27 7.2v7.98c0 7.08-4.47 11.67-11 14.07C9.47 26.85 5 22.26 5 15.18V7.2L16 2.75Z" />
+            <path d="M11.2 15.8 14.35 19 21 12.25" />
+          </svg>
+        </span>
+        <span>VaultShare</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#demo">Live demo</a>
+        <a href="#architecture">Architecture</a>
+        <a href="https://github.com/aimee-RH/security-file-system" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <span class="system-status"><i></i> System ready</span>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="eyebrow"><span>SECURITY-FIRST STORAGE</span><span>GO · AES-256 · RSA-4096</span></div>
+        <div class="hero-grid">
+          <div>
+            <h1>Your files.<br /><em>Your keys.</em><br />Your control.</h1>
+            <p class="hero-copy">
+              Encrypted file sharing built for an untrusted datastore. Share access, append safely,
+              and revoke an entire downstream sharing chain with full key rotation.
+            </p>
+            <div class="hero-actions">
+              <button class="button button-primary" data-scroll-demo>Run the live demo <span>→</span></button>
+              <a class="button button-secondary" href="#architecture">Explore the design</a>
+            </div>
+          </div>
+          <div class="hero-visual" aria-label="Encrypted sharing illustration">
+            <div class="orbit orbit-large"></div>
+            <div class="orbit orbit-small"></div>
+            <div class="key-chip key-a">AES-256</div>
+            <div class="key-chip key-b">HMAC</div>
+            <div class="key-chip key-c">RSA</div>
+            <div class="vault">
+              <div class="vault-ring"></div>
+              <svg viewBox="0 0 80 80" aria-hidden="true">
+                <rect x="19" y="34" width="42" height="34" rx="8" />
+                <path d="M29 34V24c0-14.5 22-14.5 22 0v10" />
+                <circle cx="40" cy="50" r="4" />
+                <path d="M40 54v7" />
+              </svg>
+            </div>
+            <div class="packet packet-one">01001011</div>
+            <div class="packet packet-two">9f3a···e21c</div>
+          </div>
+        </div>
+        <div class="trust-strip" aria-label="Core guarantees">
+          <div><strong>100</strong><span>concurrent appends</span></div>
+          <div><strong>0</strong><span>lost chunks</span></div>
+          <div><strong>7</strong><span>secured API endpoints</span></div>
+          <div><strong>BFS</strong><span>recursive revocation</span></div>
+        </div>
+      </section>
+
+      <section class="demo-section" id="demo">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">INTERACTIVE WALKTHROUGH</p>
+            <h2>Watch access control happen.</h2>
+          </div>
+          <p>
+            This guided scenario calls the real Go API. It creates three users, encrypts a file,
+            builds a downstream sharing chain, then revokes it.
+          </p>
+        </div>
+
+        <div class="demo-shell">
+          <aside class="scenario-panel">
+            <div class="scenario-title">
+              <span>DEMO SCENARIO</span>
+              <button class="icon-button" id="reset-demo" title="Reset demo" aria-label="Reset demo">↻</button>
+            </div>
+            <ol class="steps" id="steps">
+              <li class="active" data-step="0"><span>01</span><div><strong>Initialize vault</strong><small>Create Alice, Bob & Charlie</small></div></li>
+              <li data-step="1"><span>02</span><div><strong>Store & append</strong><small>Write encrypted file chunks</small></div></li>
+              <li data-step="2"><span>03</span><div><strong>Share access</strong><small>Alice → Bob → Charlie</small></div></li>
+              <li data-step="3"><span>04</span><div><strong>Revoke branch</strong><small>Rotate keys recursively</small></div></li>
+              <li data-step="4"><span>05</span><div><strong>Inspect audit trail</strong><small>Verify every operation</small></div></li>
+            </ol>
+            <div class="scenario-note">
+              <span id="backend-mode-label">REAL API</span>
+              <p id="backend-mode-copy">Every step exercises the running Gin service and cryptographic core.</p>
+            </div>
+          </aside>
+
+          <div class="workspace">
+            <div class="workspace-toolbar">
+              <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+              <span>vaultshare / project-notes.txt</span>
+              <span class="encrypted-pill">◆ ENCRYPTED</span>
+            </div>
+
+            <div class="workspace-grid">
+              <section class="file-card">
+                <div class="file-heading">
+                  <div class="file-icon">TXT</div>
+                  <div>
+                    <h3>project-notes.txt</h3>
+                    <p id="file-meta">Waiting to initialize demo</p>
+                  </div>
+                  <button class="mini-button" id="load-file" disabled>Load file</button>
+                </div>
+                <div class="content-preview" id="content-preview">
+                  <span class="line-number">01</span><span class="placeholder">Encrypted content will appear here.</span>
+                </div>
+                <div class="crypto-row">
+                  <span><i class="crypto-icon">◇</i>AES-256 encrypted</span>
+                  <span><i class="crypto-icon">#</i>HMAC verified</span>
+                  <span><i class="crypto-icon">↻</i>Version controlled</span>
+                </div>
+              </section>
+
+              <section class="access-card">
+                <div class="card-label"><span>ACCESS GRAPH</span><span id="access-count">0 ACTIVE</span></div>
+                <div class="access-graph" id="access-graph">
+                  <div class="person owner"><b>A</b><span>Alice<small>Owner</small></span></div>
+                  <div class="graph-line line-ab"></div>
+                  <div class="person bob muted"><b>B</b><span>Bob<small>No access</small></span></div>
+                  <div class="graph-line line-bc"></div>
+                  <div class="person charlie muted"><b>C</b><span>Charlie<small>No access</small></span></div>
+                </div>
+                <div class="rotation-status" id="rotation-status">
+                  <span class="status-symbol">◇</span>
+                  <div><strong>Keys protected</strong><small>Revocation rotates encryption material</small></div>
+                </div>
+              </section>
+
+              <section class="event-card">
+                <div class="card-label"><span>LIVE EVENT STREAM</span><span class="live-dot">LIVE</span></div>
+                <div class="event-log" id="event-log" aria-live="polite">
+                  <div class="empty-log">Run the first step to begin.</div>
+                </div>
+              </section>
+
+              <section class="action-card">
+                <p class="step-counter" id="step-counter">STEP 1 OF 5</p>
+                <h3 id="action-title">Initialize the secure vault</h3>
+                <p id="action-description">Create isolated identities for Alice, Bob, and Charlie, then issue scoped Bearer tokens.</p>
+                <button class="button button-primary full-width" id="run-step">Create demo users <span>→</span></button>
+                <p class="action-hint" id="action-hint">A unique suffix keeps each run isolated.</p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="architecture" id="architecture">
+        <div class="section-heading dark-heading">
+          <div><p class="kicker">UNDER THE HOOD</p><h2>Trust the cryptography,<br />not the datastore.</h2></div>
+          <p>The server assumes storage can be read, modified, replayed, or replaced. Confidentiality and integrity are enforced client-side.</p>
+        </div>
+        <div class="architecture-grid">
+          <article><span class="feature-number">01</span><div class="feature-icon">⌁</div><h3>Append-only chunks</h3><p>Encrypted linked chunks make append cost independent of total file size.</p><code>O(append) ≠ O(file)</code></article>
+          <article><span class="feature-number">02</span><div class="feature-icon">⑂</div><h3>Recursive revocation</h3><p>BFS finds every downstream recipient before rotating keys for retained users.</p><code>Alice → Bob → Charlie</code></article>
+          <article><span class="feature-number">03</span><div class="feature-icon">◎</div><h3>Tamper detection</h3><p>Every ciphertext is bound to its UUID and authenticated before decryption.</p><code>HMAC-SHA256 ✓</code></article>
+          <article><span class="feature-number">04</span><div class="feature-icon">⇄</div><h3>Concurrency safety</h3><p>Per-file locking and version checks prevent lost updates under contention.</p><code>100 appends · 0 lost</code></article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand footer-brand" href="#top"><span class="brand-mark">◆</span><span>VaultShare</span></a>
+      <p>Security-first file storage & sharing system · Built by Ruihuan Gao</p>
+      <a href="https://github.com/aimee-RH/security-file-system" target="_blank" rel="noreferrer">View source on GitHub ↗</a>
+    </footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

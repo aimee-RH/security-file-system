@@ -57,6 +57,7 @@ func newAuthenticatedRouter() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(AuditMiddleware())
+	registerDemoUI(r)
 
 	// 豁免 AuthMiddleware 的 endpoint（按 IP 限流）
 	r.POST("/api/users/init", RateLimitMiddleware(DefaultRateLimiter), handleUserInit)

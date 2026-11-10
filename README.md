@@ -192,6 +192,26 @@ go run ./cmd/cs161-server
 
 The default port is `8080`.
 
+### Interactive Portfolio Demo
+
+**Live demo:** [aimee-rh.github.io/security-file-system](https://aimee-rh.github.io/security-file-system/)
+
+Starting the API server also serves a lightweight, dependency-free web demo at:
+
+```text
+http://localhost:8080/demo/
+```
+
+The guided walkthrough calls the real REST API to demonstrate the complete security flow:
+
+```text
+initialize users → store + append → share Alice → Bob → Charlie
+                 → recursively revoke Bob → inspect audit trail
+```
+
+The frontend is embedded into the Go binary, so no Node.js install or separate frontend process is required.
+The GitHub Pages build uses an in-browser portfolio adapter because Pages cannot run the Go backend; the locally served version exercises the real API.
+
 To use another port:
 
 ```bash
