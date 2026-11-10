@@ -7,6 +7,12 @@ const state = {
   events: [],
 };
 
+// GitHub Pages cannot run the Go service. On github.io the same guided flow uses
+// a deterministic in-browser adapter; local/server-hosted builds continue to
+// call the real Gin API.
+const IS_STATIC_DEMO = location.hostname.endsWith("github.io") || new URLSearchParams(location.search).has("static-demo");
+const staticStore = { invitations: 0, audit: [] };
+
 const steps = [
   {
     title: "Initialize the secure vault",
@@ -49,6 +55,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 async function api(path, options = {}, user = null) {
+  if (IS_STATIC_DEMO) return staticDemoAPI(path, options, user);
   const headers = { ...(options.headers || {}) };
   if (options.body) headers["Content-Type"] = "application/json";
   if (user?.token) headers.Authorization = `Bearer ${user.token}`;
@@ -59,6 +66,38 @@ async function api(path, options = {}, user = null) {
     throw new Error(payload?.error || payload || `Request failed (${response.status})`);
   }
   return payload;
+}
+
+async function staticDemoAPI(path, options = {}, user = null) {
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  const body = options.body ? JSON.parse(options.body) : {};
+  const route = path.split("?")[0];
+  const actor = user?.username || body.username || "system";
+
+  if (route === "/api/users/init") return { status: "ok", username: body.username };
+  if (route === "/api/auth/token") return { token: `demo-${body.username}`, subject: body.username };
+  if (route === "/api/files/load") return state.fileContent;
+  if (route === "/api/audit") {
+    const subject = new URL(path, location.origin).searchParams.get("subject");
+    const entries = subject ? staticStore.audit.filter((entry) => entry.Subject === subject) : staticStore.audit;
+    return { entries, count: entries.length };
+  }
+  if (route === "/api/share/invite") {
+    staticStore.invitations += 1;
+    staticStore.audit.push(demoAudit(actor, "POST", route));
+    return { invitation_id: `00000000-0000-4000-8000-${String(staticStore.invitations).padStart(12, "0")}` };
+  }
+
+  staticStore.audit.push(demoAudit(actor, options.method || "GET", route));
+  if (route === "/api/files/store") return { status: "ok", bytes: body.data?.length || 0 };
+  if (route === "/api/files/append") return { status: "ok", appended: body.data?.length || 0 };
+  if (route === "/api/share/accept") return { status: "ok", filename: body.filename };
+  if (route === "/api/share/revoke") return { status: "ok", revoked: body.recipient };
+  throw new Error(`Unsupported static demo route: ${route}`);
+}
+
+function demoAudit(subject, method, path) {
+  return { Subject: subject, Method: method, Path: path, Result: "success" };
 }
 
 function credentials(user, extra = {}) {
@@ -252,6 +291,8 @@ function resetDemo() {
   state.users = {};
   state.fileContent = "";
   state.events = [];
+  staticStore.invitations = 0;
+  staticStore.audit = [];
   $("#event-log").innerHTML = '<div class="empty-log">Run the first step to begin.</div>';
   $("#content-preview").innerHTML = '<span class="line-number">01</span><span class="placeholder">Encrypted content will appear here.</span>';
   $("#file-meta").textContent = "Waiting to initialize demo";
@@ -271,4 +312,9 @@ $("#run-step").addEventListener("click", runStep);
 $("#reset-demo").addEventListener("click", resetDemo);
 $("#load-file").addEventListener("click", loadFile);
 $$('[data-scroll-demo]').forEach((button) => button.addEventListener("click", () => $("#demo").scrollIntoView({ behavior: "smooth" })));
+if (IS_STATIC_DEMO) {
+  $("#backend-mode-label").textContent = "PORTFOLIO DEMO";
+  $("#backend-mode-copy").textContent = "GitHub Pages runs this walkthrough in-browser. Clone the repository to exercise the real Gin API and cryptographic core.";
+  $(".system-status").innerHTML = "<i></i> Demo ready";
+}
 renderStep();
